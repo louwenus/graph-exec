@@ -6,6 +6,7 @@ void cond_wait(condition_t * cond){
   while (! cond->flag) {
     pthread_cond_wait(&cond->cond, &cond->mut);
   }
+  cond->flag=false;
   pthread_mutex_unlock(&cond->mut);
 }
 
