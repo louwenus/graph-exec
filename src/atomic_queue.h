@@ -18,5 +18,6 @@ typedef struct {
 chain_elt* chain_pop(chain* ch);
 //add next to the chain, atomically
 void chain_push(chain *ch,chain_elt* next);
-
+//initialize a chain
+void chain_init(chain *ch);
 #endif
