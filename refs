@@ -1,0 +1,5 @@
+C far from asm far from Low level: https://queue.acm.org/detail.cfm?id=3212479
+C23 reference manual: notably [[unsequenced]] and [[reproducible]]: https://www.open-std.org/JTC1/SC22/WG14/www/docs/n3220.pdf 
+Dependency Graph auto exec (C++/destined for crude parra): https://github.com/taskflow/taskflow
+Tapir (Optimized? parrallel compiler for Cilk (C superset for parallelism)) : http://cilk.mit.edu/tapir/   https://dl.acm.org/doi/10.1145/3018743.3018758
+Tomasulo: http://www.quadibloc.com/comp/cp07.htm

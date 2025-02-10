@@ -14,7 +14,7 @@ DEBUG_FLAGS=-ggdb -g3 -O0 -fno-inline -march=native
 
 SOURCES=
 SOURCES+=test-lib.c
-SOURCES+=lib-graph-exec.c
+SOURCES+=atomic_queue.c
 OBJECTS+=$(patsubst %.c,build/%.o,$(SOURCES))
 
 
@@ -58,4 +58,11 @@ clean:
 	-rm -rf build
 
 mpropper: clean
-	-rm test_lib
+	-rm test-lib
+
+tests:
+	mkdir -p tests_bin
+	$(CC) $(CFLAGS) $(LDFLAGS) tests/test-mutex.c src/simple_mutex.c -o tests_bin/test_mux
+	$(CC) $(CFLAGS) $(LDFLAGS) tests/test-queue.c src/atomic_queue.c -o tests_bin/test_queue
+	./tests_bin/test_mux
+	./tests_bin/test_queue
