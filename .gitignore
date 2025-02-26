@@ -25,5 +25,5 @@
 *.so
 *.so.*
 
-./build
-./tests_bin
+build
+tests_bin

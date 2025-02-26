@@ -1,5 +1,6 @@
 #include "simple_mutex.h"
 
+#include <stdatomic.h>
 #include <uchar.h>
 #include <linux/futex.h>
 #include <sys/syscall.h>
@@ -11,27 +12,25 @@
 //                                            >1: locked, someone await
 
 void futex_lock(futex *mutex){
-    char32_t tmp;
-    tmp = atomic_fetch_add(mutex, 1);
-    if (tmp==0) {
+    char32_t tmp=0;
+    if (atomic_compare_exchange_strong_explicit(mutex, &tmp,1,memory_order_consume,memory_order_relaxed)){
         return;
     }
     else {
         while (1) {
-            syscall(SYS_futex, mutex, FUTEX_WAIT_PRIVATE, tmp+1, NULL, NULL, 0);
-            tmp = atomic_fetch_add(mutex,2);
+            tmp = atomic_exchange_explicit(mutex,2,memory_order_consume);
             if (tmp==0) {
                 return;
             }
+            syscall(SYS_futex, mutex, FUTEX_WAIT_PRIVATE, 2, NULL, NULL, 0);
         }
     }
 }
 
 void futex_unlock(futex *mutex){
     char32_t tmp;
-    tmp = atomic_fetch_sub(mutex, 1);
+    tmp = atomic_exchange_explicit(mutex, 0,memory_order_release);
     if (tmp!=1) {
-        atomic_store(mutex, 0);
         syscall(SYS_futex, mutex, FUTEX_WAKE_PRIVATE,1, NULL, NULL, 0);
     }
 }

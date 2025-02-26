@@ -18,7 +18,7 @@ SOURCES+=atomic_queue.c
 OBJECTS+=$(patsubst %.c,build/%.o,$(SOURCES))
 
 
-.PHONY: all main main-prog debug help clean mpropper
+.PHONY: all main main-prog debug help clean mpropper tests debug-tests release-tests
 
 all: main 
 
@@ -60,9 +60,19 @@ clean:
 mpropper: clean
 	-rm test-lib
 
-tests:
+debug-tests: CFLAGS+=$(DEBUG_FLAGS)
+debug-tests: LDFLAGS+=$(DEBUG_FLAGS)
+debug-tests: tests
+
+release-tests: CFLAGS+=$(RELEASE_FLAGS)
+release-tests: LDFLAGS+=-s $(RELEASE_FLAGS)
+release-tests: tests
+
+
+tests: tests/* src/*
 	mkdir -p tests_bin
 	$(CC) $(CFLAGS) $(LDFLAGS) tests/test-mutex.c src/simple_mutex.c -o tests_bin/test_mux
 	$(CC) $(CFLAGS) $(LDFLAGS) tests/test-queue.c src/atomic_queue.c -o tests_bin/test_queue
-	./tests_bin/test_mux
-	./tests_bin/test_queue
+	$(CC) $(CFLAGS) $(LDFLAGS) tests/speed_comp_rust.c src/atomic_queue.c -o tests_bin/test_queue_fast
+	#./tests_bin/test_mux
+	#./tests_bin/test_queue

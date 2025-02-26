@@ -43,7 +43,7 @@ impl<T> AtomicQueue<T> {
         }
     }
 
-    pub unsafe fn push(&self, element: &mut QueueElem<T>) -> () {
+    pub fn push<'a, 'b>(&'a self, element: &'b mut QueueElem<T>) where 'b: 'a {
         element.next.store(null_mut(), Relaxed);
         let nptr = element as *mut _;
         let npptr = &raw mut element.next;
@@ -73,6 +73,7 @@ impl<T> AtomicQueue<T> {
                             .compare_exchange(tmp, null_mut(), Relaxed, Relaxed);
                         return Some(&mut *(tmp as *mut QueueElem<T>));
                     }
+                    std::thread::yield_now();
                     next = (*(tmp as *mut QueueElem<T>)).next.load(Acquire);
                 }
                 self.head.store(next, Relaxed);

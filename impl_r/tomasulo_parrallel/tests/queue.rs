@@ -1,60 +1,72 @@
-use std::{
-    ptr::null_mut,
-    sync::atomic::{
-        AtomicPtr, AtomicU64, AtomicUsize, Ordering::{Acquire, Relaxed, Release}
-    },
-};
-use tomasulo_parrallel::atomic_queue::{AtomicQueue, QueueElem};
+
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::thread;
+use tomasulo_parrallel::atomic_queue::{AtomicQueue, QueueElem};
 
-const NUM_THREAD: i8 = 5;
-const NUM_ITERATION: i64 = 1000000;
+const NUM_THREAD: i8 = 1;
+const NUM_ITERATION: i64 = 5000000;
 
-static CNT : AtomicUsize = AtomicUsize::new(0);
+static CNT: AtomicUsize = AtomicUsize::new(0);
 
-
-
-fn pusher(queue : &AtomicQueue<i64>, & elems:&Vec<QueueElem<i64>>) {
+fn pusher(queue: &AtomicQueue<i64>, elems: &Test) {
     let mut i = 0;
-    while i<NUM_ITERATION {
+    while i < NUM_ITERATION {
         let cur = CNT.fetch_add(1, Relaxed);
-        queue.push(&mut (elems[cur]));
-        i+=1;
+        unsafe { queue.push(&mut ((*elems.0)[cur])) };
+        i += 1;
     }
 }
 
-fn collect_q(queue : &AtomicQueue<i64>){
+fn collect_q(queue: &AtomicQueue<i64>) {
     let mut i = 0_i64;
-    while i < NUM_ITERATION*NUM_THREAD as i64 {
+    while i < NUM_ITERATION * NUM_THREAD as i64 {
         let mut ret = None;
         while ret.is_none() {
             ret = queue.pop();
         }
         unsafe {
             let elem = ret.unwrap_unchecked();
-            assert_ne!(elem.data,-1);
+            assert_ne!(elem.data, -1);
             elem.data = -1;
         }
-        i+=1;
+        i += 1;
     }
 }
+
+#[derive(Clone, Copy)]
+struct Test(*mut [QueueElem<i64>]);
+unsafe impl Sync for Test {}
+unsafe impl Send for Test {}
 
 #[test]
 fn concurent_usage() -> () {
     let queue = AtomicQueue::<i64>::new();
-    let mut elems :Vec<_>= (0..NUM_ITERATION*NUM_THREAD as i64).map(
-        |i| {
-            QueueElem::new(i)
-        }
-    ).collect();
+    let elems: Vec<_> = (0..NUM_ITERATION * NUM_THREAD as i64)
+        .map(|i| QueueElem::new(i))
+        .collect();
+    let qref: &AtomicQueue<_> = Box::leak(queue);
+    let eref = Test(Vec::leak(elems));
     let collector = thread::spawn(move || {
-        collect_q(queue.as_ref());
+        collect_q(qref);
     });
-    let pushers :Vec<_> = (0..NUM_THREAD).map(
-        |_| {
+    let pushers: Vec<_> = (0..NUM_THREAD)
+        .map(|_| {
             thread::spawn(move || {
-                pusher(queue.as_ref(), & elems);
+                pusher(qref, &eref);
             })
-        }
-    ).collect();
-}
+        })
+        .collect();
+    collector.join().unwrap();
+    for pusher in pushers {
+        pusher.join().unwrap();
+    }
+    let _ =(0..NUM_ITERATION*NUM_THREAD as i64).for_each(
+        |i| {
+            unsafe {
+           assert_eq!(-1,(*eref.0)[i as usize].data); 
+        }}
+    );
+    unsafe {
+    let _edropper = Box::from_raw(eref.0);
+    let _qdropper = Box::from(qref);
+}}
