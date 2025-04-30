@@ -49,7 +49,7 @@ impl<T> AtomicQueue<T> {
         let npptr = &raw mut element.next;
         let old = self.tail.swap(npptr, Release);
         unsafe {
-            (*old).store(nptr, Relaxed);
+            (*old).store(nptr, Release);
         }
     }
     pub fn pop(&self) -> Option<&mut QueueElem<T>> {
