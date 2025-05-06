@@ -1,9 +1,11 @@
 use std::{
-    mem::offset_of,
+    marker::PhantomPinned,
+    pin::Pin,
     ptr::null_mut,
+    mem::{offset_of, MaybeUninit},
     sync::atomic::{
         AtomicPtr,
-        Ordering::{Acquire, Relaxed, Release, AcqRel},
+        Ordering::{AcqRel, Acquire, Relaxed, Release},
     },
 };
 
@@ -12,10 +14,10 @@ pub struct QueueElem<T> {
     pub data: T,
 }
 impl<T> QueueElem<T> {
-    pub fn new(elem:T) -> QueueElem<T> {
+    pub fn new(elem: T) -> QueueElem<T> {
         QueueElem {
             next: AtomicPtr::new(null_mut()),
-            data: elem
+            data: elem,
         }
     }
 }
@@ -23,10 +25,11 @@ impl<T> QueueElem<T> {
 pub struct AtomicQueue<T> {
     head: AtomicPtr<QueueElem<T>>,
     tail: AtomicPtr<AtomicPtr<QueueElem<T>>>,
+    _pin: PhantomPinned,
 }
 
 impl<T> AtomicQueue<T> {
-    pub fn new() -> Box<AtomicQueue<T>> {
+    pub fn new() -> Pin<Box<AtomicQueue<T>>> {
         let mut n = Box::<AtomicQueue<T>>::new_uninit();
         unsafe {
             //used as *const, but there is no AtomicConstPtr (that I know of)
@@ -37,13 +40,30 @@ impl<T> AtomicQueue<T> {
                         .byte_offset(offset_of!(AtomicQueue<T>, head) as isize)
                         as *mut AtomicPtr<QueueElem<T>>,
                 ),
+                _pin: PhantomPinned,
             });
 
-            n.assume_init()
+            Box::into_pin(n.assume_init())
         }
     }
+    
+    pub unsafe fn init(pinned: Pin<&mut MaybeUninit<Self>>) {
+        pinned.get_unchecked_mut().as_mut_ptr().write(
+            AtomicQueue {
+                head: AtomicPtr::new(null_mut()),
+                tail: AtomicPtr::new(
+                    pinned.as_ref().as_ptr().byte_offset(offset_of!(AtomicQueue<T>,head) as isize)
+                    as *mut AtomicPtr<QueueElem<T>>
+                ),
+                _pin: PhantomPinned,
+            });
+        
+    }
 
-    pub fn push<'a, 'b>(&'a self, element: &'b mut QueueElem<T>) where 'b: 'a {
+    pub fn push<'a, 'b>(self: Pin<&'a Self>, element: &'b mut QueueElem<T>)
+    where
+        'b: 'a,
+    {
         element.next.store(null_mut(), Relaxed);
         let nptr = element as *mut _;
         let npptr = &raw mut element.next;
@@ -52,7 +72,7 @@ impl<T> AtomicQueue<T> {
             (*old).store(nptr, Release);
         }
     }
-    pub fn pop(&self) -> Option<&mut QueueElem<T>> {
+    pub fn pop(self: Pin<&Self>) -> Option<&mut QueueElem<T>> {
         let tmp = self.head.load(Acquire);
         if tmp == null_mut() {
             return None;

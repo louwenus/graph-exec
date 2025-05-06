@@ -1,31 +1,62 @@
-
 use {
-    atomic_queue,
+    crate::atomic_queue::{AtomicQueue, QueueElem},
     std::{
+        mem::MaybeUninit,
         sync::atomic::{
-            AtomicPtr,
-            AtomicChar,
+            AtomicU8, AtomicPtr, AtomicUsize,
             Ordering::{Acquire, Relaxed, Release},
         },
     },
 };
 
-struct SingleWrapper<T,U> {
-  data: MaybeUnintialized<T>,
-  status: AtomicChar,
-  waiters: atomic_queue::AtomicQueue<U>,
+#[derive(Debug)]
+#[repr(AtomicU8)]
+enum Status {
+    Empty,
+    Initialised,
+    FilledSignaling,
+    FilledResting,
+} 
+
+struct SingleFunctionWrapper<T> {
+    function: fn(&T, *mut null) -> (),
+    context: *mut null,
+}
+
+struct SingleDataWrapper<T> {
+    data: MaybeUninit<T>,
+    status: Status,
+    waiters: Box<AtomicQueue<SingleFunctionWrapper<T>>>,
+    active_users: AtomicUsize,
+}
+
+impl<T> SingleDataWrapper<T> {
+    fn new() -> SingleDataWrapper<T> {
+        SingleDataWrapper {
+            data: MaybeUninit::uninit(),
+            status: Status::Empty,
+            waiters: AtomicQueue::new(),
+            active_users: AtomicUsize::new(0),
+        }
+    }
+    unsafe fn init_assuming_empty(self:&SingleDataWrapper<T>) {
+        debug_assert_eq!(self.status,Status::Empty);
+        self.status.into().swap(Status::Initialised);
+    }
+
+    
 }
 
 pub struct Wrapper<T> {
-
-    data: [SingleWrapper<T;fn(&T,*mut)->()>; 4]
+    data: [SingleDataWrapper<T>; 4],
+    next: AtomicU8,
 }
 
 impl<T> Wrapper<T> {
     pub fn new_empty() -> Wrapper<T> {
         Wrapper {
-            is_init : false,
-            data : 0
+            data: std::array::from_fn(|_| SingleDataWrapper::new()),
+            next: 0.into(),
         }
     }
 }
