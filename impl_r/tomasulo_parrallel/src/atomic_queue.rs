@@ -3,7 +3,7 @@ use std::{
     ptr::null_mut,
     sync::atomic::{
         AtomicPtr,
-        Ordering::{Acquire, Relaxed, Release},
+        Ordering::{Acquire, Relaxed, Release, AcqRel},
     },
 };
 
@@ -47,7 +47,7 @@ impl<T> AtomicQueue<T> {
         element.next.store(null_mut(), Relaxed);
         let nptr = element as *mut _;
         let npptr = &raw mut element.next;
-        let old = self.tail.swap(npptr, Release);
+        let old = self.tail.swap(npptr, AcqRel);
         unsafe {
             (*old).store(nptr, Release);
         }
