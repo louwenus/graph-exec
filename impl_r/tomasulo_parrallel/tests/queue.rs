@@ -21,7 +21,7 @@ fn pusher(queue: Pin<&AtomicQueue<i64>>, elems: &Test) {
 
 fn collect_q(queue: Pin<&AtomicQueue<i64>>) {
     let mut i = 0_i64;
-    while i < NUM_ITERATION * NUM_THREAD as i64 {
+    while i < NUM_ITERATION as i64 {
         let mut ret = None;
         while ret.is_none() {
             ret = queue.pop();
@@ -46,11 +46,16 @@ fn concurent_usage() -> () {
     let elems: Vec<_> = (0..NUM_ITERATION * NUM_THREAD as i64)
         .map(|i| QueueElem::new(i))
         .collect();
-    let qref: Pin<&AtomicQueue<i64>> = unsafe { Pin::new_unchecked(Box::leak(Pin::into_inner_unchecked(queue))) };
+    let qref: Pin<&AtomicQueue<i64>> =
+        unsafe { Pin::new_unchecked(Box::leak(Pin::into_inner_unchecked(queue))) };
     let eref = Test(Vec::leak(elems));
-    let collector = thread::spawn(move || {
-        collect_q(qref);
-    });
+    let collectors: Vec<_> = (0..NUM_THREAD)
+        .map(|_| {
+            thread::spawn(move || {
+                collect_q(qref);
+            })
+        })
+        .collect();
     let pushers: Vec<_> = (0..NUM_THREAD)
         .map(|_| {
             thread::spawn(move || {
@@ -58,7 +63,9 @@ fn concurent_usage() -> () {
             })
         })
         .collect();
-    collector.join().unwrap();
+    for collector in collectors {
+        collector.join().unwrap();
+    }
     for pusher in pushers {
         pusher.join().unwrap();
     }
@@ -67,6 +74,7 @@ fn concurent_usage() -> () {
     });
     unsafe {
         //let _edropper = Vec::from_raw(eref.0);
-        let _qdropper = Box::from_raw(Pin::into_inner_unchecked(qref) as *const _ as *mut AtomicQueue<i64>);
+        let _qdropper =
+            Box::from_raw(Pin::into_inner_unchecked(qref) as *const _ as *mut AtomicQueue<i64>);
     }
 }
