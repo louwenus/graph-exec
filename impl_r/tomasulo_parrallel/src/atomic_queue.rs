@@ -73,7 +73,7 @@ impl<T> AtomicQueue<T> {
         let double_pointer_to_elt = &raw mut element.next;
         let old = self.tail.swap(double_pointer_to_elt, AcqRel);
         unsafe {
-            (*old).store(pointer_to_element, Release);
+            (*old).store(pointer_to_element, Relaxed);
         }
         self.counter.fetch_add(1, Release);
     }
