@@ -1,10 +1,10 @@
 use std::{
     marker::PhantomPinned,
+    mem::{offset_of, MaybeUninit},
     pin::Pin,
     ptr::null_mut,
-    mem::{offset_of, MaybeUninit},
     sync::atomic::{
-        AtomicPtr,
+        AtomicIsize, AtomicPtr,
         Ordering::{AcqRel, Acquire, Relaxed, Release},
     },
 };
@@ -25,39 +25,43 @@ impl<T> QueueElem<T> {
 pub struct AtomicQueue<T> {
     head: AtomicPtr<QueueElem<T>>,
     tail: AtomicPtr<AtomicPtr<QueueElem<T>>>,
+    counter: AtomicIsize,
     _pin: PhantomPinned,
+}
+
+unsafe fn ptr_to_ref<'a, T>(ptr: *mut T) -> Pin<&'a mut MaybeUninit<T>> {
+    // Cast to *mut MaybeUninit<T>
+    let mu_ptr = ptr.cast::<MaybeUninit<T>>();
+    // Convert to &mut MaybeUninit<T>
+    let mu_ref = &mut *mu_ptr;
+    // Create Pin (unsafe because we assume pinning holds)
+    Pin::new_unchecked(mu_ref)
 }
 
 impl<T> AtomicQueue<T> {
     pub fn new() -> Pin<Box<AtomicQueue<T>>> {
-        let mut n = Box::<AtomicQueue<T>>::new_uninit();
+        let mut new = Box::<AtomicQueue<T>>::new_uninit();
         unsafe {
-            //used as *const, but there is no AtomicConstPtr (that I know of)
-            n.as_mut_ptr().write(AtomicQueue {
-                head: AtomicPtr::new(null_mut()),
-                tail: AtomicPtr::new(
-                    n.as_ptr()
-                        .byte_offset(offset_of!(AtomicQueue<T>, head) as isize)
-                        as *mut AtomicPtr<QueueElem<T>>,
-                ),
-                _pin: PhantomPinned,
-            });
-
-            Box::into_pin(n.assume_init())
+            Self::init(ptr_to_ref(new.as_mut_ptr()));
+            Box::into_pin(new.assume_init())
         }
     }
-    
+
     pub unsafe fn init(pinned: Pin<&mut MaybeUninit<Self>>) {
-        pinned.get_unchecked_mut().as_mut_ptr().write(
-            AtomicQueue {
-                head: AtomicPtr::new(null_mut()),
-                tail: AtomicPtr::new(
-                    pinned.as_ref().as_ptr().byte_offset(offset_of!(AtomicQueue<T>,head) as isize)
-                    as *mut AtomicPtr<QueueElem<T>>
-                ),
-                _pin: PhantomPinned,
-            });
-        
+        // Compute the `tail` pointer **before** moving `pinned`
+        let tail_ptr = pinned
+            .as_ref() // Borrow `pinned` immutably here
+            .as_ptr()
+            .byte_offset(offset_of!(Self, head) as isize)
+            as *mut AtomicPtr<QueueElem<T>>;
+
+        // Now move `pinned` into `get_unchecked_mut`
+        pinned.get_unchecked_mut().write(AtomicQueue {
+            head: AtomicPtr::new(null_mut()),
+            tail: AtomicPtr::new(tail_ptr), // Use precomputed pointer
+            counter: 0.into(),
+            _pin: PhantomPinned,
+        });
     }
 
     pub fn push<'a, 'b>(self: Pin<&'a Self>, element: &'b mut QueueElem<T>)
@@ -65,18 +69,24 @@ impl<T> AtomicQueue<T> {
         'b: 'a,
     {
         element.next.store(null_mut(), Relaxed);
-        let nptr = element as *mut _;
-        let npptr = &raw mut element.next;
-        let old = self.tail.swap(npptr, AcqRel);
+        let pointer_to_element = element as *mut _;
+        let double_pointer_to_elt = &raw mut element.next;
+        let old = self.tail.swap(double_pointer_to_elt, AcqRel);
         unsafe {
-            (*old).store(nptr, Release);
+            (*old).store(pointer_to_element, Release);
         }
+        self.counter.fetch_add(1, Release);
     }
     pub fn pop(self: Pin<&Self>) -> Option<&mut QueueElem<T>> {
-        let tmp = self.head.load(Acquire);
-        if tmp == null_mut() {
-            return None;
+        let count = self.counter.fetch_sub(1, Acquire);
+        if count <= 0 {
+            if self.counter.fetch_add(1, Release) < 0 {
+                return None;
+            } else {
+                return self.pop();
+            }
         } else {
+            let tmp = self.head.load(Acquire);
             unsafe {
                 let mut next = (*tmp).next.load(Acquire);
                 while next == null_mut() {

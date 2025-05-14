@@ -21,7 +21,7 @@ fn counter_thread() {
 #[test]
 fn increment_protected() {
     let threads: Vec<_> = (0..NUM_THREAD)
-        .map(|i| {
+        .map(|_| {
             thread::spawn(move || {
                 counter_thread();
             })
