@@ -78,37 +78,36 @@ impl<T> AtomicQueue<T> {
         self.counter.fetch_add(1, Release);
     }
     pub fn pop(self: Pin<&Self>) -> Option<&mut QueueElem<T>> {
-        let count = self.counter.fetch_sub(1, Acquire);
-        if count <= 0 {
-            if self.counter.fetch_add(1, Release) < 0 {
-                return None;
-            } else {
-                return self.pop();
-            }
-        } else {
-            let tmp = self.head.load(Acquire);
-            unsafe {
-                let mut next = (*tmp).next.load(Acquire);
-                while next == null_mut() {
-                    let old = self.tail.compare_exchange(
-                        &raw mut (*tmp).next,
-                        &raw const self.head as *mut _,
-                        Relaxed,
-                        Relaxed,
-                    );
-                    if old.is_ok() {
-                        //compare in case already modified by write to the tail
-                        let _ = self
-                            .head
-                            .compare_exchange(tmp, null_mut(), Relaxed, Relaxed);
-                        return Some(&mut *(tmp as *mut QueueElem<T>));
-                    }
-                    std::thread::yield_now();
-                    next = (*(tmp as *mut QueueElem<T>)).next.load(Acquire);
-                }
-                self.head.store(next, Relaxed);
-                Some(&mut *(tmp as *mut QueueElem<T>))
-            }
+        if self.counter.fetch_sub(1, Acquire) <= 0 {
+            self.counter.fetch_add(1, Release);
+            return None;
         }
+
+        let mut tmp = self.head.swap(null_mut(), Relaxed);
+        while tmp == null_mut() {
+            std::thread::yield_now();
+            tmp = self.head.swap(null_mut(), Relaxed);
+        }
+
+        let mut next = unsafe { (*tmp).next.load(Relaxed) };
+        while next == null_mut() {
+
+            let old_tail = unsafe {
+                self.tail.compare_exchange(
+                    &raw mut (*tmp).next,
+                    &raw const self.head as *mut _,
+                    Relaxed,
+                    Relaxed,
+                )
+            };
+            if old_tail.is_ok() {
+                //compare in case already modified by write to the tail
+                unsafe { return Some(&mut *(tmp as *mut QueueElem<T>)) };
+            }
+            std::thread::yield_now();
+            next = unsafe { (*tmp).next.load(Relaxed) };
+        }
+        self.head.store(next, Relaxed);
+        unsafe { return Some(&mut *(tmp as *mut QueueElem<T>)) };
     }
 }
