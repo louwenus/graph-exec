@@ -25,6 +25,8 @@ impl<T> QueueElem<T> {
     }
 }
 
+
+
 /// A lock-free, thread-safe queue allowing multiple concurrent producers and consumers.
 pub struct AtomicQueue<T> {
     head: AtomicPtr<QueueElem<T>>,
@@ -117,3 +119,4 @@ impl<T> AtomicQueue<T> {
         unsafe { return Some(&mut *(tmp as *mut QueueElem<T>)) };
     }
 }
+
