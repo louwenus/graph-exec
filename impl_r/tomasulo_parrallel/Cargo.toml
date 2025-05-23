@@ -3,8 +3,11 @@ name = "tomasulo_parrallel"
 version = "0.1.0"
 edition = "2021"
 
+
 [dependencies]
-libc = "0.2.170"
+libc = "^0.2.170"
+pin-project = "1"
+threadpool = "1.8.1"
 
 [profile.release]
 debug = true

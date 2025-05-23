@@ -1,6 +1,7 @@
+use pin_project::pin_project;
 use std::{
-    marker::PhantomPinned,
-    mem::{offset_of, MaybeUninit},
+    hint::{likely,unlikely},
+    mem::{offset_of, transmute, MaybeUninit},
     pin::Pin,
     ptr::null_mut,
     sync::atomic::{
@@ -8,10 +9,9 @@ use std::{
         Ordering::{AcqRel, Acquire, Relaxed, Release},
     },
 };
-
 /// A single element of the queue, holding data and a pointer to the next element.
 pub struct QueueElem<T> {
-    next: AtomicPtr<QueueElem<T>>,
+    pub(crate) next: AtomicPtr<QueueElem<T>>,
     pub data: T,
 }
 
@@ -25,48 +25,37 @@ impl<T> QueueElem<T> {
     }
 }
 
-
-
 /// A lock-free, thread-safe queue allowing multiple concurrent producers and consumers.
-pub struct AtomicQueue<T> {
+#[pin_project(!Unpin)]
+pub struct AtomicQueue<T, const OUT_MARKED: bool> {
     head: AtomicPtr<QueueElem<T>>,
     tail: AtomicPtr<AtomicPtr<QueueElem<T>>>,
     counter: AtomicIsize,
-    _pin: PhantomPinned,
 }
 
-unsafe fn ptr_to_ref<'a, T>(ptr: *mut T) -> Pin<&'a mut MaybeUninit<T>> {
-    let mu_ptr = ptr.cast::<MaybeUninit<T>>();
-    let mu_ref = &mut *mu_ptr;
-    Pin::new_unchecked(mu_ref)
-}
-
-impl<T> AtomicQueue<T> {
+impl<T, const OUT_MARKED: bool> AtomicQueue<T, OUT_MARKED> {
     /// Constructs a new, empty `AtomicQueue` wrapped in a pinned box.
-    /// Safe to use concurrently from multiple threads.
-    pub fn new() -> Pin<Box<AtomicQueue<T>>> {
-        let mut new = Box::<AtomicQueue<T>>::new_uninit();
-        unsafe {
-            Self::init(ptr_to_ref(new.as_mut_ptr()));
-            Box::into_pin(new.assume_init())
-        }
+    pub fn new() -> Pin<Box<Self>> {
+        let mut new = Box::into_pin(Box::<Self>::new_uninit());
+        Self::init(new.as_mut());
+        unsafe { transmute(new) }
     }
 
     /// Initializes a queue in place on uninitialized memory.
-    /// Intended for use within `new`; unsafe due to raw memory handling.
-    pub unsafe fn init(pinned: Pin<&mut MaybeUninit<Self>>) {
-        let tail_ptr = pinned
-            .as_ref()
-            .as_ptr()
-            .byte_offset(offset_of!(Self, head) as isize)
-            as *mut AtomicPtr<QueueElem<T>>;
+    pub fn init(pinned: Pin<&mut MaybeUninit<Self>>) {
+        unsafe {
+            let head_ptr = pinned
+                .as_ref()
+                .as_ptr()
+                .byte_offset(offset_of!(Self, head) as isize)
+                as *mut AtomicPtr<QueueElem<T>>;
 
-        pinned.get_unchecked_mut().write(AtomicQueue {
-            head: AtomicPtr::new(null_mut()),
-            tail: AtomicPtr::new(tail_ptr),
-            counter: 0.into(),
-            _pin: PhantomPinned,
-        });
+            pinned.get_unchecked_mut().write(Self {
+                head: AtomicPtr::new(null_mut()),
+                tail: AtomicPtr::new(head_ptr),
+                counter: 0.into(),
+            });
+        }
     }
 
     /// Pushes a queue element onto the queue.
@@ -89,18 +78,18 @@ impl<T> AtomicQueue<T> {
     /// Safe to call from multiple threads without additional synchronization.
     pub fn pop(self: Pin<&Self>) -> Option<&mut QueueElem<T>> {
         if self.counter.fetch_sub(1, Acquire) <= 0 {
-            self.counter.fetch_add(1, Release);
+            self.counter.fetch_add(1, Relaxed);
             return None;
         }
 
         let mut tmp = self.head.swap(null_mut(), Relaxed);
-        while tmp == null_mut() {
+        while unlikely(tmp == null_mut()) {
             std::thread::yield_now();
             tmp = self.head.swap(null_mut(), Relaxed);
         }
 
         let mut next = unsafe { (*tmp).next.load(Relaxed) };
-        while next == null_mut() {
+        while unlikely(next == null_mut()) {
             let old_tail = unsafe {
                 self.tail.compare_exchange(
                     &raw mut (*tmp).next,
@@ -110,13 +99,22 @@ impl<T> AtomicQueue<T> {
                 )
             };
             if old_tail.is_ok() {
-                unsafe { return Some(&mut *(tmp as *mut QueueElem<T>)) };
+                unsafe {
+                    if OUT_MARKED {
+                        (*tmp).next.store(transmute(1 as usize), Relaxed);
+                    }
+                    return Some(&mut *(tmp as *mut QueueElem<T>));
+                };
             }
             std::thread::yield_now();
             next = unsafe { (*tmp).next.load(Relaxed) };
         }
         self.head.store(next, Relaxed);
-        unsafe { return Some(&mut *(tmp as *mut QueueElem<T>)) };
+        unsafe {
+            if OUT_MARKED {
+                (*tmp).next.store(transmute(1 as usize), Relaxed);
+            }
+            return Some(&mut *(tmp as *mut QueueElem<T>));
+        };
     }
 }
-

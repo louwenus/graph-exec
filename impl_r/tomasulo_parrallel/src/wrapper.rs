@@ -1,12 +1,13 @@
+use pin_project::pin_project;
 use {
     crate::atomic_queue::{AtomicQueue, QueueElem},
     std::{
-        mem::{offset_of, transmute, MaybeUninit},
+        hint::unreachable_unchecked,
+        mem::{transmute, MaybeUninit},
         pin::Pin,
         ptr::addr_of_mut,
-        str::Matches,
         sync::atomic::{
-            AtomicPtr, AtomicU8, AtomicUsize,
+            AtomicU8, AtomicUsize,
             Ordering::{Acquire, Relaxed, Release},
         },
     },
@@ -38,15 +39,17 @@ struct SingleFunctionWrapper<T> {
 }
 
 impl<T> SingleFunctionWrapper<T> {
-    fn call(&self,t:&T) {
-        (self.function)(t,self.context)
+    fn call(&self, t: &T) {
+        (self.function)(t, self.context)
     }
 }
 
+#[pin_project]
 struct SingleDataWrapper<T> {
     data: MaybeUninit<T>,
     status: AtomicU8, //Will be a "AtomicStatus"
-    waiters: AtomicQueue<SingleFunctionWrapper<T>>,
+    #[pin]
+    waiters: AtomicQueue<SingleFunctionWrapper<T>, true>,
     active_users: AtomicUsize,
 }
 
@@ -54,8 +57,7 @@ impl<T> SingleDataWrapper<T> {
     fn new() -> Pin<Box<SingleDataWrapper<T>>> {
         let mut new = Box::<MaybeUninit<SingleDataWrapper<T>>>::pin(MaybeUninit::uninit());
         unsafe {
-            Self::init(
-                new.as_mut().get_unchecked_mut().as_mut_ptr() );
+            Self::init(new.as_mut().get_unchecked_mut().as_mut_ptr());
             transmute::<_, _>(new)
         }
     }
@@ -64,8 +66,8 @@ impl<T> SingleDataWrapper<T> {
         unsafe {
             addr_of_mut!((*ptr).data).write(MaybeUninit::uninit());
             addr_of_mut!((*ptr).status).write(Status::Empty.into());
-            AtomicQueue::<T>::init(Pin::new_unchecked(
-                &mut *(addr_of_mut!((*ptr).waiters).cast::<MaybeUninit<AtomicQueue<T>>>()),
+            AtomicQueue::<T, true>::init(Pin::new_unchecked(
+                &mut *(addr_of_mut!((*ptr).waiters).cast::<MaybeUninit<AtomicQueue<T, true>>>()),
             ));
             addr_of_mut!((*ptr).active_users).write(AtomicUsize::new(0));
         }
@@ -77,11 +79,50 @@ impl<T> SingleDataWrapper<T> {
     }
 
     fn effective_write(self: Pin<&mut Self>, val: T) {
-            self.data.write(val);
-            self.status.store(Status::FilledSignaling.into(), Release);
-            while let Some(fun)=self.waiters.pop(){
-                
+        let this = self.project();
+        this.data.write(val);
+        this.status.store(Status::FilledSignaling.into(), Release);
+        while let Some(fun) = this.waiters.as_ref().pop() {
+            unsafe { fun.data.call(this.data.assume_init_ref()) };
+            this.active_users.fetch_sub(1, Relaxed);
+        }
+        this.status.store(Status::FilledResting as u8, Release);
+    }
+
+    fn submit_reader(self: Pin<&mut Self>, f: &mut QueueElem<SingleFunctionWrapper<T>>) {
+        let this = self.project();
+        let status = unsafe { transmute::<_,Status>(this.status.load(Relaxed)) };
+        match status {
+            Status::Initialised => {
+                this.active_users.fetch_add(1, Relaxed);
+                this.waiters.as_ref().push(f);
+                loop {
+                    match unsafe { transmute::<_, Status>(this.status.load(Acquire)) } {
+                        Status::Initialised => {
+                            return;
+                        }
+                        Status::FilledResting => {
+                            if f.next.load(Relaxed) as usize != 1 {
+                                f.data.call(unsafe { this.data.assume_init_ref() });
+                            };
+                        }
+                        Status::FilledSignaling => {
+                            std::thread::yield_now();
+                            break;
+                        }
+                        _ => unsafe {
+                            unreachable_unchecked();
+                        },
+                    }
+                }
             }
+            Status::FilledSignaling | Status::FilledResting => {
+                unsafe { f.data.call(this.data.assume_init_ref()) };
+            }
+            _ => unsafe {
+                unreachable_unchecked();
+            },
+        }
     }
 }
 
@@ -92,9 +133,11 @@ pub struct Wrapper<T> {
 
 impl<T> Wrapper<T> {
     pub fn new_empty() -> Pin<Box<Wrapper<T>>> {
-        let mut new = Box::pin(MaybeUninit::uninit());
-        unsafe {Self::init_empty(new.as_mut().get_unchecked_mut().as_mut_ptr());
-         transmute(new) }
+        let mut new: Pin<Box<MaybeUninit<Self>>> = Box::into_pin(Box::new_uninit());
+        unsafe {
+            Self::init_empty(new.as_mut().get_unchecked_mut().as_mut_ptr());
+            transmute(new)
+        }
     }
     pub fn init_empty(ptr: *mut Wrapper<T>) {
         unsafe {
