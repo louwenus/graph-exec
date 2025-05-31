@@ -5,6 +5,7 @@ edition = "2021"
 
 
 [dependencies]
+ctor = "0.4.2"
 libc = "^0.2.170"
 pin-project = "1"
 threadpool = "1.8.1"
