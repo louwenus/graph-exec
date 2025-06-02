@@ -42,7 +42,7 @@ impl Into<AtomicU8> for Status {
 #[pin_project]
 pub(crate) struct SingleDataWrapper<T,const N:u8> where
     [(); N as usize]: {
-    data: UnsafeCell<MaybeUninit<T>>,
+    pub(crate) data: UnsafeCell<MaybeUninit<T>>,
     status: AtomicU8, //Will be a "AtomicStatus"
     #[pin]
     waiters: AtomicQueue<VirtualTask>,
@@ -126,6 +126,12 @@ impl<T, const N:u8> SingleDataWrapper<T,N> where [(); N as usize]: {
             },
         }
     }
+    pub(crate) fn signal_read_done(&self) {
+        let cnt=self.active_users.fetch_sub(1, Relaxed);
+        if cnt==1 {
+            self.status.store(Status::Empty.into(), Release);
+        }
+    }
 }
 
 #[pin_project]
@@ -151,11 +157,12 @@ impl<T, const N:u8> Wrapper<T,N> where [(); N as usize]: {
             }
         }
     }
-    pub(crate) fn submit_reader(self: &Self, f: &QueueElem<VirtualTask>) {
+    pub(crate) fn submit_reader(self: &Self, f: &QueueElem<VirtualTask>) -> *const SingleDataWrapper<T,N> {
         unsafe {
             self.data[self.next as usize]
                 .as_ref_unchecked()
                 .submit_reader(f);
+            self.data[self.next as usize].get()
         }
     }
     pub(crate) fn deffered_write(self: Pin<&mut Self>) -> *mut SingleDataWrapper<T,N> {

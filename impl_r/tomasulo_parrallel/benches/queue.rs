@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use tomasulo_parrallel::atomic_queue::{AtomicQueue, QueueElem};
 
-const NUM_THREAD: i8 = 2;
+const NUM_THREAD: i8 = 1;
 const NUM_ITERATION: i64 = 5000;
 const NUM_ELT: i8 = 2;
 
@@ -81,7 +81,7 @@ fn thread_push(queue: Arc<Mutex<VecDeque<i64>>>) {
 
 #[bench]
 pub fn bench_mutex_queue(b: &mut Bencher) {
-    let mut queue = VecDeque::new();
+    let mut queue = VecDeque::with_capacity(NUM_ELT as usize);
     (0..NUM_ELT).for_each(|i| queue.push_back(i as i64));
 
     let queue = Arc::new(Mutex::new(queue));
@@ -170,7 +170,7 @@ fn ato_one_pop(b: &mut Bencher) -> () {
 
 #[bench]
 pub fn mutex_one_pop(b: &mut Bencher) {
-    let queue = VecDeque::new();
+    let queue = VecDeque::with_capacity(NUM_ITERATION as usize*NUM_THREAD as usize);
 
     let queue = Arc::new(Mutex::new(queue));
 

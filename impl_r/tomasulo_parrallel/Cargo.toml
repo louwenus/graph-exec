@@ -12,3 +12,6 @@ threadpool = "1.8.1"
 
 [profile.release]
 debug = true
+
+[profile.bench]
+debug = true
