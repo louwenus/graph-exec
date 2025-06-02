@@ -1,12 +1,12 @@
 use pin_project::pin_project;
 use std::{
-    hint::{likely, unlikely},
+    hint::unlikely,
     mem::{offset_of, transmute, MaybeUninit},
     pin::Pin,
     ptr::null_mut,
     sync::atomic::{
         AtomicIsize, AtomicPtr,
-        Ordering::{SeqCst, AcqRel, Acquire, Relaxed, Release},
+        Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst},
     },
 };
 /// A single element of the queue, holding data and a pointer to the next element.
@@ -64,10 +64,8 @@ impl<T> AtomicQueue<T> {
             counter: AtomicIsize::new(0),
         }
     }
-    pub(crate) fn init_valid(self:&Self){
-        self.tail.store(
-                    (&raw const self.head) as *mut _
-            , SeqCst);
+    pub(crate) fn init_valid(self: &Self) {
+        self.tail.store((&raw const self.head) as *mut _, SeqCst);
     }
     /// Pushes a queue element onto the queue.
     /// Safe to call from multiple threads without additional synchronization.
@@ -119,7 +117,7 @@ impl<T> AtomicQueue<T> {
         }
         self.head.store(next, Relaxed);
         unsafe {
-            return Some(& *(tmp as *const QueueElem<T>));
+            return Some(&*(tmp as *const QueueElem<T>));
         };
     }
 }

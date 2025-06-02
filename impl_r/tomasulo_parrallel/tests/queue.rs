@@ -1,5 +1,7 @@
-use libc::fflush;
-use std::io::{self, Stdout, Write};
+#![allow(incomplete_features)]
+#![feature(unsafe_cell_access)]
+
+use std::cell::UnsafeCell;
 use std::thread;
 use std::{
     pin::Pin,
@@ -13,7 +15,7 @@ const NUM_ELT: i8 = 4;
 
 static CNT: AtomicUsize = AtomicUsize::new(0);
 
-fn pusher(queue: Pin<&AtomicQueue<i64>>, elems: &Test) {
+fn pusher(queue: Pin<&AtomicQueue<UnsafeCell<i64>>>, elems: &Test) {
     let mut i = 0;
     while i < NUM_ITERATION {
         let cur = CNT.fetch_add(1, Relaxed);
@@ -22,7 +24,7 @@ fn pusher(queue: Pin<&AtomicQueue<i64>>, elems: &Test) {
     }
 }
 
-fn collect_q(queue: Pin<&AtomicQueue<i64>>) {
+fn collect_q(queue: Pin<&AtomicQueue<UnsafeCell<i64>>>) {
     let mut i = 0_i64;
     while i < NUM_ITERATION as i64 {
         let mut ret = None;
@@ -31,25 +33,25 @@ fn collect_q(queue: Pin<&AtomicQueue<i64>>) {
         }
         unsafe {
             let elem = ret.unwrap_unchecked();
-            assert_ne!(elem.data, -1);
-            elem.data = -1;
+            assert_ne!(*elem.data.as_ref_unchecked(), -1);
+            *elem.data.as_mut_unchecked() = -1;
         }
         i += 1;
     }
 }
 
 #[derive(Clone, Copy)]
-struct Test(*mut [QueueElem<i64>]);
+struct Test(*mut [QueueElem<UnsafeCell<i64>>]);
 unsafe impl Sync for Test {}
 unsafe impl Send for Test {}
 
 #[test]
 fn concurent_usage() -> () {
-    let queue = AtomicQueue::<i64>::new();
+    let queue = AtomicQueue::<UnsafeCell<i64>>::new();
     let elems: Vec<_> = (0..NUM_ITERATION * NUM_THREAD as i64)
-        .map(|_| QueueElem::new(1))
+        .map(|_| QueueElem::new(UnsafeCell::new(1)))
         .collect();
-    let qref: Pin<&AtomicQueue<i64>> =
+    let qref: Pin<&AtomicQueue<UnsafeCell<i64>>> =
         unsafe { Pin::new_unchecked(Box::leak(Pin::into_inner_unchecked(queue))) };
     let eref = Test(Vec::leak(elems));
     let collectors: Vec<_> = (0..NUM_THREAD)
@@ -73,7 +75,7 @@ fn concurent_usage() -> () {
         pusher.join().unwrap();
     }
     let _ = (0..NUM_ITERATION * NUM_THREAD as i64).for_each(|i| unsafe {
-        assert_eq!(-1, (*eref.0)[i as usize].data);
+        assert_eq!(-1, *(*eref.0)[i as usize].data.as_ref_unchecked());
     });
     unsafe {
         //let _edropper = Vec::from_raw(eref.0);
@@ -82,7 +84,7 @@ fn concurent_usage() -> () {
     }
 }
 
-fn push_pop(queue: Pin<&AtomicQueue<i64>>) {
+fn push_pop(queue: Pin<&AtomicQueue<UnsafeCell<i64>>>) {
     let mut i = 0_i64;
     while i < NUM_ITERATION as i64 {
         let mut ret = None;
@@ -99,11 +101,11 @@ fn push_pop(queue: Pin<&AtomicQueue<i64>>) {
 
 #[test]
 fn few_elems_check() {
-    let queue = AtomicQueue::<i64>::new();
+    let queue = AtomicQueue::<UnsafeCell<i64>>::new();
     let elems: Vec<_> = (0..NUM_ELT as i64)
-        .map(|_| QueueElem::new(1 as i64))
+        .map(|_| QueueElem::new(UnsafeCell::new(1 as i64)))
         .collect();
-    let qref: Pin<&AtomicQueue<i64>> =
+    let qref: Pin<&AtomicQueue<UnsafeCell<i64>>> =
         unsafe { Pin::new_unchecked(Box::leak(Pin::into_inner_unchecked(queue))) };
     let eref = Vec::leak(elems);
     for i in 0..NUM_ELT {
@@ -122,8 +124,10 @@ fn few_elems_check() {
     }
     for _ in 0..NUM_ELT as i8 {
         let next = qref.pop().expect("Not enough elements got out");
-        assert_eq!(1, next.data);
-        next.data = -1;
+        unsafe {
+            assert_eq!(1, *next.data.as_ref_unchecked());
+            *next.data.as_mut_unchecked() = -1;
+        }
     }
     unsafe {
         //let _edropper = Vec::from_raw(eref.0);
