@@ -17,9 +17,9 @@ use std::sync::{Arc, Mutex};
 
 use tomasulo_parrallel::atomic_queue::{AtomicQueue, QueueElem};
 
-const NUM_THREAD: i8 = 1;
-const NUM_ITERATION: i64 = 5000;
-const NUM_ELT: i8 = 2;
+const NUM_THREAD: i8 = 8;
+const NUM_ITERATION: i64 = 500;
+const NUM_ELT: i8 = 4;
 
 use threadpool::ThreadPool;
 
