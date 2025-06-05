@@ -9,6 +9,7 @@ ctor = "0.4.2"
 libc = "^0.2.170"
 pin-project = "1"
 threadpool = "1.8.1"
+tomasulo_macro = { path = "./tomasulo_macro" }
 
 [profile.release]
 debug = true
