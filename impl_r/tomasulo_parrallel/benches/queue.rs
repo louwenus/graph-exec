@@ -3,12 +3,9 @@
 extern crate test;
 use test::Bencher;
 
-use libc::fflush;
 use std::sync::LazyLock;
-use std::thread;
 use std::{
     collections::VecDeque,
-    io::{self, Stdout, Write},
     pin::Pin,
     sync::atomic::{AtomicUsize, Ordering::Relaxed},
 };
@@ -97,8 +94,6 @@ pub fn bench_mutex_queue(b: &mut Bencher) {
 
 static CNT: AtomicUsize = AtomicUsize::new(0);
 
-
-
 fn pusher_ato(queue: Pin<&AtomicQueue<i64>>, elems: &Test) {
     for _ in 0..NUM_ITERATION {
         let cur = CNT.fetch_add(1, Relaxed);
@@ -126,7 +121,7 @@ fn pusher_mux(queue: Arc<Mutex<VecDeque<i64>>>) {
 }
 
 fn poper_mux(queue: Arc<Mutex<VecDeque<i64>>>) {
-    for _ in 0..(NUM_ITERATION* (NUM_THREAD as i64)) {
+    for _ in 0..(NUM_ITERATION * (NUM_THREAD as i64)) {
         let mut ret = None;
         while ret.is_none() {
             ret = queue.lock().unwrap().pop_front();
@@ -149,7 +144,7 @@ fn ato_one_pop(b: &mut Bencher) -> () {
         unsafe { Pin::new_unchecked(Box::leak(Pin::into_inner_unchecked(queue))) };
     let eref = Test(Vec::leak(elems));
     b.iter(|| {
-        CNT.store(0,Relaxed);
+        CNT.store(0, Relaxed);
         POOL.execute(move || {
             collect_ato(qref);
         });
@@ -170,12 +165,12 @@ fn ato_one_pop(b: &mut Bencher) -> () {
 
 #[bench]
 pub fn mutex_one_pop(b: &mut Bencher) {
-    let queue = VecDeque::with_capacity(NUM_ITERATION as usize*NUM_THREAD as usize);
+    let queue = VecDeque::with_capacity(NUM_ITERATION as usize * NUM_THREAD as usize);
 
     let queue = Arc::new(Mutex::new(queue));
 
     b.iter(|| {
-        CNT.store(0,Relaxed);
+        CNT.store(0, Relaxed);
         let queue_c = Arc::clone(&queue);
         POOL.execute(|| poper_mux(queue_c));
         (0..NUM_THREAD).for_each(|_| {
