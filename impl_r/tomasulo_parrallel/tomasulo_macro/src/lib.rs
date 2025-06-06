@@ -6,7 +6,6 @@ use syn::{parse_macro_input, Stmt};
 pub fn tomasulo(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let mut f = parse_macro_input!(input as syn::ItemFn);
 
-    let fn_name = f.sig.ident.clone();
     let args = f.sig.inputs.iter().map(|arg| match arg {
         syn::FnArg::Receiver(receiver) => match receiver.mutability {
             None => quote! { #receiver },
@@ -24,13 +23,16 @@ pub fn tomasulo(_attr: TokenStream, input: TokenStream) -> TokenStream {
     });
 
     let mut custom_fn = f.clone();
+
+    f.sig.ident = format_ident!("{}_user", f.sig.ident);
+    let fn_name = f.sig.ident.clone();
+
     let call = quote! {
         #fn_name(#(#args),*)
     }
     .into();
     custom_fn.block.stmts = vec![Stmt::Expr(parse_macro_input!(call as syn::Expr), None)];
 
-    f.sig.ident = format_ident!("{}_user", fn_name);
     quote::quote! {
         #custom_fn
         #f
