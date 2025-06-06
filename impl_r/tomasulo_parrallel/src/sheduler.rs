@@ -16,17 +16,15 @@ pub(crate) struct VirtualTask {
     counter: AtomicUsize,
 }
 
-union RawData {
+pub(crate) union RawData {
     ptr: *const (),
     value: MaybeUninit<usize>,
 }
 
-type TaskContext<const N: u8> = [RawData; N as usize];
+type TaskContext<const N: usize> = [RawData; N];
 
 #[repr(C)]
-pub(crate) struct RealTask<const N: u8>
-where
-    [(); N as usize]:,
+pub(crate) struct RealTask<const N: usize>
 {
     task: QueueElem<VirtualTask>,
     context: TaskContext<N>,
@@ -69,7 +67,7 @@ pub fn work_infinitely() {
     }
 }
 
-fn cast_ptr<const N: u8>(ptr: *const VirtualTask) -> *const TaskContext<N> {
+fn cast_ptr<const N: usize>(ptr: *const VirtualTask) -> *const TaskContext<N> {
     unsafe {
         let ptr =
             ptr.byte_offset((offset_of!(RealTask<N>, task) as isize) * -1) as *const RealTask<N>;
@@ -77,7 +75,7 @@ fn cast_ptr<const N: u8>(ptr: *const VirtualTask) -> *const TaskContext<N> {
     }
 }
 
-trait TorWrapperT<'a, T> {
+pub(crate)  trait TorWrapperT<'a, T> {
     fn prepare_read<'b>(&self, task: &'b QueueElem<VirtualTask>) -> RawData
     where
         'a: 'b;
@@ -86,7 +84,7 @@ trait TorWrapperT<'a, T> {
     const TASK_WAIT: bool;
 }
 
-impl<'a, T, const N: u8> TorWrapperT<'a, T> for Wrapper<T, N>
+impl<'a, T, const N: usize> TorWrapperT<'a, T> for Wrapper<T, N>
 where
     [(); N as usize]:,
 {

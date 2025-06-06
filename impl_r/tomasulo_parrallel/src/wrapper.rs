@@ -40,8 +40,8 @@ impl Into<AtomicU8> for Status {
 }
 
 #[pin_project]
-pub(crate) struct SingleDataWrapper<T,const N:u8> where
-    [(); N as usize]: {
+pub(crate) struct SingleDataWrapper<T,const N:usize>
+{
     pub(crate) data: UnsafeCell<MaybeUninit<T>>,
     status: AtomicU8, //Will be a "AtomicStatus"
     #[pin]
@@ -50,7 +50,7 @@ pub(crate) struct SingleDataWrapper<T,const N:u8> where
     task: RealTask<N>,
 }
 
-impl<T, const N:u8> SingleDataWrapper<T,N> where [(); N as usize]: {
+impl<T, const N:usize> SingleDataWrapper<T,N> where [(); N as usize]: {
     fn new() -> Pin<Box<Self>> {
         let mut new = Box::<MaybeUninit<Self>>::pin(MaybeUninit::uninit());
         unsafe {
@@ -135,13 +135,13 @@ impl<T, const N:u8> SingleDataWrapper<T,N> where [(); N as usize]: {
 }
 
 #[pin_project]
-pub struct Wrapper<T,const N:u8=8> where [(); N as usize]: {
+pub struct Wrapper<T,const N:usize = 8> {
     #[pin]
     data: [UnsafeCell<SingleDataWrapper<T,N>>; 4],
     next: u8,
 }
 
-impl<T, const N:u8> Wrapper<T,N> where [(); N as usize]: {
+impl<T, const N:usize> Wrapper<T,N> {
     pub fn new_empty() -> Pin<Box<Self>> {
         let mut new: Pin<Box<MaybeUninit<Self>>> = Box::into_pin(Box::new_uninit());
         unsafe {
@@ -165,7 +165,7 @@ impl<T, const N:u8> Wrapper<T,N> where [(); N as usize]: {
             self.data[self.next as usize].get()
         }
     }
-    pub(crate) fn deffered_write(self: Pin<&mut Self>) -> *mut SingleDataWrapper<T,N> {
+    pub(crate) fn deffered_write_prepare(self: Pin<&mut Self>) -> *mut SingleDataWrapper<T,N> {
         let this = self.project();
         *this.next = (*this.next + 1) % 4;
         unsafe {
@@ -175,12 +175,17 @@ impl<T, const N:u8> Wrapper<T,N> where [(); N as usize]: {
                 .load(Acquire)
                 != Status::Empty.into()
             {
-                todo!();
+                if ! sheduler::work_once() {
+                    
+                }
             }
             this.data[*this.next as usize]
                 .as_ref_unchecked()
                 .init_assuming_empty();
         }
         this.data[*this.next as usize].get()
+    }
+    pub(crate) fn submit_writter(self: Pin<&mut Self>, ) {
+        
     }
 }
